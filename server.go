@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -24,7 +22,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/getsentry/raven-go"
-	lightstep "github.com/lightstep/lightstep-tracer-go"
 	"github.com/zenazn/goji/bind"
 	"github.com/zenazn/goji/graceful"
 
@@ -37,8 +34,6 @@ import (
 	"github.com/stripe/veneur/samplers"
 	"github.com/stripe/veneur/ssf"
 	"github.com/stripe/veneur/trace"
-
-	opentracing "github.com/opentracing/opentracing-go"
 )
 
 // VERSION stores the current veneur version.
@@ -114,19 +109,6 @@ type Server struct {
 	tracerSinks []tracerSink
 
 	traceLightstepAccessToken string
-}
-
-// TODO refactor and move this
-// TODO better name, also finalize type signature
-type traceFlusher func(ssf.SSFSpan)
-
-type tracerSink struct {
-	name string
-
-	// This may be nil, if the tracer doesn't use
-	// an opentracing backend
-	tracer opentracing.Tracer
-	flush  traceFlusher
 }
 
 // NewFromConfig creates a new veneur server from a configuration specification.
@@ -281,9 +263,9 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 	// Configure tracing workers and sinks
 	if len(conf.SsfAddress) > 0 && ret.tracingSinkEnabled() {
 
-		bufferSize := conf.SsfBufferSize
-		if bufferSize == 0 {
-			bufferSize = defaultSpanBufferSize
+		// Set a sane default
+		if conf.SsfBufferSize == 0 {
+			conf.SsfBufferSize = defaultSpanBufferSize
 		}
 
 		ret.TraceAddr, err = net.ResolveUDPAddr("udp", conf.SsfAddress)
@@ -300,8 +282,7 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 		// configure Datadog as sink
 		if ret.DDTraceAddress != "" {
 			ret.tracerSinks = append(ret.tracerSinks, tracerSink{
-				name:   "Datadog",
-				tracer: nil,
+				name: "Datadog",
 				flush: func(ssfSpan ssf.SSFSpan) {
 					flushSpansDatadog(ret.DDTraceAddress, ret.HTTPClient, ret.Statsd, ssfSpan)
 				},
@@ -311,61 +292,11 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 
 		// configure Lightstep as Sink
 		if ret.traceLightstepAccessToken != "" {
-			var host *url.URL
-			host, err = url.Parse(conf.TraceLightstepCollectorHost)
-			if err != nil {
-				log.WithError(err).WithField(
-					"host", conf.TraceLightstepCollectorHost,
-				).Error("Error parsing LightStep collector URL")
-				return
-			}
-
-			port, err := strconv.Atoi(host.Port())
-			if err != nil {
-				port = lightstepDefaultPort
-			} else {
-				log.WithError(err).WithFields(logrus.Fields{
-					"port":         port,
-					"default_port": lightstepDefaultPort,
-				}).Warn("Error parsing LightStep port, using default")
-			}
-
-			reconPeriod, err := time.ParseDuration(conf.TraceLightstepReconnectPeriod)
-			if err != nil {
-				log.WithError(err).WithFields(logrus.Fields{
-					"interval":         conf.TraceLightstepReconnectPeriod,
-					"default_interval": lightstepDefaultInterval,
-				}).Warn("Failed to parse reconnect duration, using default.")
-				reconPeriod = lightstepDefaultInterval
-			}
-
-			log.WithFields(logrus.Fields{
-				"Host": host.Hostname(),
-				"Port": port,
-			}).Info("Dialing lightstep host")
-
-			maxSpans := conf.TraceLightstepMaximumSpans
-			if maxSpans == 0 {
-				maxSpans = bufferSize
-				log.WithField("max spans", maxSpans).Info("Using default maximum spans — ssf_buffer_size — for LightStep")
-			}
-
-			lightstepTracer := lightstep.NewTracer(lightstep.Options{
-				AccessToken:     conf.TraceLightstepAccessToken,
-				ReconnectPeriod: reconPeriod,
-				Collector: lightstep.Endpoint{
-					Host:      host.Hostname(),
-					Port:      port,
-					Plaintext: true,
-				},
-				UseGRPC:          true,
-				MaxBufferedSpans: maxSpans,
-			})
 
 			ret.tracerSinks = append(ret.tracerSinks, tracerSink{
 				name:   "Lightstep",
 				tracer: lightstepTracer,
-				flush: func(ssfSpan ssf.SSFSpan) {
+				ingest: func(ssfSpan ssf.SSFSpan) {
 					flushSpanLightstep(lightstepTracer, ssfSpan)
 				},
 			})

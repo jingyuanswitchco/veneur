@@ -334,11 +334,11 @@ func (ew *EventWorker) Flush() ([]samplers.UDPEvent, []samplers.UDPServiceCheck)
 type TraceWorker struct {
 	TraceChan chan ssf.SSFSpan
 	mutex     *sync.Mutex
-	sinks     []tracerSink
+	sinks     []TracerSink
 }
 
 // NewTraceWorker creates an TraceWorker ready to collect events and service checks.
-func NewTraceWorker(sinks []tracerSink) *TraceWorker {
+func NewTraceWorker(sinks []TracerSink) *TraceWorker {
 	return &TraceWorker{
 		TraceChan: make(chan ssf.SSFSpan),
 		mutex:     &sync.Mutex{},
@@ -349,10 +349,9 @@ func NewTraceWorker(sinks []tracerSink) *TraceWorker {
 // Work will start the TraceWorker listening for spans.
 // This function will never return.
 func (tw *TraceWorker) Work() {
-	for _, s := range tw.sinks {
-		for m := range tw.TraceChan {
-			// TODO add some metric collection here, saving per-service span counts
-			s.flush(m)
+	for m := range tw.TraceChan {
+		for _, s := range tw.sinks {
+			s.ingest(m)
 		}
 	}
 }

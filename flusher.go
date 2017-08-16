@@ -17,9 +17,6 @@ import (
 
 	"github.com/DataDog/datadog-go/statsd"
 	"github.com/Sirupsen/logrus"
-	lightstep "github.com/lightstep/lightstep-tracer-go"
-	opentracing "github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
 	"github.com/stripe/veneur/samplers"
 	"github.com/stripe/veneur/ssf"
 	"github.com/stripe/veneur/trace"
@@ -525,7 +522,7 @@ func (s *Server) flushTraces(ctx context.Context) {
 
 	for _, sink := range s.tracerSinks {
 		sinkFlushStart := time.Now()
-		sink.flush(span.Attach(ctx))
+		// sink.flush(span.Attach(ctx))
 		tags := []string{
 			fmt.Sprintf("sink:%s", sink.name),
 			fmt.Sprintf("service:%s", trace.Service),
@@ -785,62 +782,4 @@ func flushSpansDatadog(ddTraceAddress string, httpClient *http.Client, stats *st
 	} else {
 		log.Info("No traces to flush to Datadog, skipping.")
 	}
-}
-
-// func flushSpanLightstep(s *Server, lightstepTracer opentracing.Tracer, ssfSpan ssf.SSFSpan) {
-// span, _ := trace.StartSpanFromContext(ctx, "")
-// defer span.Finish()
-// for _, ssfSpan := range ssfSpans {
-// flushSpanLightstep(lightstepTracer, ssfSpan)
-// }
-
-// lightstep.FlushLightStepTracer(lightstepTracer)
-
-// Confusingly, this will still get called even if the Opentracing client fails to reach the collector
-// because we don't get access to the error if that happens.
-// log.WithField("traces", len(ssfSpans)).Info("Completed flushing traces to Lightstep")
-// }
-
-// flushSpanLightstep builds a tracespan from an SSF and flushes
-// it using the provided OpenTracing tracer (sink)
-func flushSpanLightstep(lightstepTracer opentracing.Tracer, ssfSpan ssf.SSFSpan) {
-	parentId := ssfSpan.ParentId
-	if parentId <= 0 {
-		parentId = 0
-	}
-
-	var errorCode int64
-	if ssfSpan.Error {
-		errorCode = 1
-	}
-
-	timestamp := time.Unix(ssfSpan.StartTimestamp/1e9, ssfSpan.StartTimestamp%1e9)
-	sp := lightstepTracer.StartSpan(
-		ssfSpan.Tags[trace.NameKey],
-		opentracing.StartTime(timestamp),
-		lightstep.SetTraceID(uint64(ssfSpan.TraceId)),
-		lightstep.SetSpanID(uint64(ssfSpan.Id)),
-		lightstep.SetParentSpanID(uint64(parentId)))
-
-	sp.SetTag(trace.ResourceKey, ssfSpan.Tags[trace.ResourceKey])
-	sp.SetTag(lightstep.ComponentNameKey, ssfSpan.Service)
-	// TODO don't hardcode
-	sp.SetTag("type", "http")
-	sp.SetTag("error-code", errorCode)
-	for k, v := range ssfSpan.Tags {
-		sp.SetTag(k, v)
-	}
-
-	// TODO add metrics as tags to the span as well
-
-	if errorCode > 0 {
-		// Note: this sets the OT-standard "error" tag, which
-		// LightStep uses to flag error spans.
-		ext.Error.Set(sp, true)
-	}
-
-	endTime := time.Unix(ssfSpan.EndTimestamp/1e9, ssfSpan.EndTimestamp%1e9)
-	sp.FinishWithOptions(opentracing.FinishOptions{
-		FinishTime: endTime,
-	})
 }

@@ -2,6 +2,8 @@ package veneur
 
 import (
 	"container/ring"
+	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -49,6 +51,113 @@ func (dd *DatadogTracerSink) Ingest(ssf.SSFSpan) {
 // sync it means we'll be making an HTTP request to send them along. We assume
 // it's beneficial to performance to defer these until the normal 10s flush.
 func (dd *DatadogTracerSink) Flush() {
+	dd.mutex.Lock()
+
+	ssfSpans := make([]ssf.SSFSpan, 0, dd.buffer.Len())
+
+	dd.buffer.Do(func(t interface{}) {
+		const tooEarly = 1497
+		const tooLate = 1497629343000000
+
+		if t != nil {
+			ssfSpan, ok := t.(ssf.SSFSpan)
+			if !ok {
+				log.Error("Got an unknown object in tracing ring!")
+				return
+			}
+
+			var timeErr string
+			if ssfSpan.StartTimestamp < tooEarly {
+				timeErr = "type:tooEarly"
+			}
+			if ssfSpan.StartTimestamp > tooLate {
+				timeErr = "type:tooLate"
+			}
+			if timeErr != "" {
+				s.Statsd.Incr("worker.trace.sink.timestamp_error", []string{timeErr}, 1)
+			}
+
+			if ssfSpan.Tags == nil {
+				ssfSpan.Tags = make(map[string]string)
+			}
+
+			// this will overwrite tags already present on the span
+			// TODO Move this to ingestion!
+			for _, tag := range tags {
+				ssfSpan.Tags[tag[0]] = tag[1]
+			}
+			ssfSpans = append(ssfSpans, ssfSpan)
+		}
+	})
+	// TODO Reset the ring
+
+	dd.mutex.Unlock()
+
+	for _, span := range ssfSpans {
+		// -1 is a canonical way of passing in invalid info in Go
+		// so we should support that too
+		parentID := span.ParentId
+
+		// check if this is the root span
+		if parentID <= 0 {
+			// we need parentId to be zero for json:omitempty to work
+			parentID = 0
+		}
+
+		resource := span.Tags[trace.ResourceKey]
+		name := span.Tags[trace.NameKey]
+
+		tags := map[string]string{}
+		for k, v := range span.Tags {
+			tags[k] = v
+		}
+
+		delete(tags, trace.NameKey)
+		delete(tags, trace.ResourceKey)
+
+		// TODO implement additional metrics
+		var metrics map[string]float64
+
+		var errorCode int64
+		if span.Error {
+			errorCode = 2
+		}
+
+		ddspan := &DatadogTraceSpan{
+			TraceID:  span.TraceId,
+			SpanID:   span.Id,
+			ParentID: parentID,
+			Service:  span.Service,
+			Name:     name,
+			Resource: resource,
+			Start:    span.StartTimestamp,
+			Duration: span.EndTimestamp - span.StartTimestamp,
+			// TODO don't hardcode
+			Type:    "http",
+			Error:   errorCode,
+			Metrics: metrics,
+			Meta:    tags,
+		}
+		finalTraces = append(finalTraces, ddspan)
+	}
+
+	if len(finalTraces) != 0 {
+		// this endpoint is not documented to take an array... but it does
+		// another curious constraint of this endpoint is that it does not
+		// support "Content-Encoding: deflate"
+
+		err := postHelper(context.TODO(), httpClient, stats, fmt.Sprintf("%s/spans", ddTraceAddress), finalTraces, "flush_traces", false)
+
+		if err == nil {
+			log.WithField("traces", len(finalTraces)).Info("Completed flushing traces to Datadog")
+		} else {
+			log.WithFields(logrus.Fields{
+				"traces":        len(finalTraces),
+				logrus.ErrorKey: err}).Warn("Error flushing traces to Datadog")
+		}
+	} else {
+		log.Info("No traces to flush to Datadog, skipping.")
+	}
 }
 
 type LightStepTracerSink struct {

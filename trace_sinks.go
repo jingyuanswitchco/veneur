@@ -31,20 +31,29 @@ type TracerSink interface {
 type DatadogTracerSink struct {
 	HTTPClient *http.Client
 	buffer     *ring.Ring
+	bufferSize int
 	mutex      *sync.Mutex
 	stats      *statsd.Client
 }
 
+// NewDatadogTracerSink creates a new Datadog sink for trace spans.
 func NewDatadogTracerSink(config *Config, stats *statsd.Client, httpClient *http.Client) DatadogTracerSink {
 	return DatadogTracerSink{
 		HTTPClient: httpClient,
-		buffer:     ring.New(config.SsfBufferSize), // TODO Fix this
+		bufferSize: config.SsfBufferSize,
+		buffer:     ring.New(config.SsfBufferSize),
 		mutex:      &sync.Mutex{},
 		stats:      stats,
 	}
 }
 
+// Ingest takes the span and adds it to the ringbuffer.
 func (dd *DatadogTracerSink) Ingest(ssf.SSFSpan) {
+	dd.mutex.Lock()
+	defer dd.mutex.Unlock()
+
+	dd.buffer.Value = m
+	dd.buffer = tw.traces.Next()
 }
 
 // Flush signals the sink to send it's spans to their destination. For this
@@ -89,8 +98,11 @@ func (dd *DatadogTracerSink) Flush() {
 			ssfSpans = append(ssfSpans, ssfSpan)
 		}
 	})
-	// TODO Reset the ring
 
+	// Reset the ring.
+	dd.buffer = ring.New(dd.bufferSize)
+
+	// We're done manipulating stuff, let Ingest loose again.
 	dd.mutex.Unlock()
 
 	for _, span := range ssfSpans {

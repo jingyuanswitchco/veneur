@@ -19,6 +19,9 @@ import (
 	"github.com/stripe/veneur/trace"
 )
 
+const datadogResourceKey = "resource"
+const datadogNameKey = "resource"
+
 // TracerSink is a receiver of spans that handles sending those spans to some
 // downstream sink. Calls to `Ingest(span)` are meant to give the sink control
 // of the span, with periodic calls to flush as a signal for sinks that don't
@@ -34,6 +37,7 @@ type DatadogTracerSink struct {
 	bufferSize int
 	mutex      *sync.Mutex
 	stats      *statsd.Client
+	tags       [][2]string
 }
 
 // NewDatadogTracerSink creates a new Datadog sink for trace spans.
@@ -83,7 +87,7 @@ func (dd *DatadogTracerSink) Flush() {
 				timeErr = "type:tooLate"
 			}
 			if timeErr != "" {
-				s.Statsd.Incr("worker.trace.sink.timestamp_error", []string{timeErr}, 1)
+				s.Statsd.Incr("worker.trace.sink.timestamp_error", []string{timeErr}, 1) // TODO tag as dd?
 			}
 
 			if ssfSpan.Tags == nil {
@@ -91,8 +95,7 @@ func (dd *DatadogTracerSink) Flush() {
 			}
 
 			// this will overwrite tags already present on the span
-			// TODO Move this to ingestion!
-			for _, tag := range tags {
+			for _, tag := range dd.tags {
 				ssfSpan.Tags[tag[0]] = tag[1]
 			}
 			ssfSpans = append(ssfSpans, ssfSpan)
@@ -105,6 +108,7 @@ func (dd *DatadogTracerSink) Flush() {
 	// We're done manipulating stuff, let Ingest loose again.
 	dd.mutex.Unlock()
 
+	// Now actually send along the spans we've accumulated.
 	for _, span := range ssfSpans {
 		// -1 is a canonical way of passing in invalid info in Go
 		// so we should support that too
@@ -116,16 +120,16 @@ func (dd *DatadogTracerSink) Flush() {
 			parentID = 0
 		}
 
-		resource := span.Tags[trace.ResourceKey]
-		name := span.Tags[trace.NameKey]
+		resource := span.Tags[datadogResourceKey]
+		name := span.Tags[datadogNameKey]
 
 		tags := map[string]string{}
 		for k, v := range span.Tags {
 			tags[k] = v
 		}
 
-		delete(tags, trace.NameKey)
-		delete(tags, trace.ResourceKey)
+		delete(tags, datadogNameKey)
+		delete(tags, datadogResourceKey)
 
 		// TODO implement additional metrics
 		var metrics map[string]float64
@@ -175,6 +179,7 @@ func (dd *DatadogTracerSink) Flush() {
 type LightStepTracerSink struct {
 	tracer opentracing.Tracer
 	stats  *statsd.Client
+	tags   [][2]string
 }
 
 func NewLightStepTracerSink(config *Config, stats *statsd.Client) (LightStepTracerSink, error) {

@@ -483,43 +483,6 @@ func (s *Server) flushTraces(ctx context.Context) {
 
 	traceRing := s.TraceWorker.Flush()
 
-	ssfSpans := make([]ssf.SSFSpan, 0, traceRing.Len())
-
-	traceRing.Do(func(t interface{}) {
-		const tooEarly = 1497
-		const tooLate = 1497629343000000
-
-		if t != nil {
-			ssfSpan, ok := t.(ssf.SSFSpan)
-			if !ok {
-				log.Error("Got an unknown object in tracing ring!")
-				return
-			}
-
-			var timeErr string
-			if ssfSpan.StartTimestamp < tooEarly {
-				timeErr = "type:tooEarly"
-			}
-			if ssfSpan.StartTimestamp > tooLate {
-				timeErr = "type:tooLate"
-			}
-			if timeErr != "" {
-				s.Statsd.Incr("worker.trace.sink.timestamp_error", []string{timeErr}, 1)
-			}
-
-			if ssfSpan.Tags == nil {
-				ssfSpan.Tags = make(map[string]string)
-			}
-
-			// this will overwrite tags already present on the span
-			// TODO Move this to ingestion!
-			for _, tag := range tags {
-				ssfSpan.Tags[tag[0]] = tag[1]
-			}
-			ssfSpans = append(ssfSpans, ssfSpan)
-		}
-	})
-
 	for _, sink := range s.tracerSinks {
 		sinkFlushStart := time.Now()
 		// sink.flush(span.Attach(ctx))
@@ -698,88 +661,9 @@ func postHelper(ctx context.Context, httpClient *http.Client, stats *statsd.Clie
 	return nil
 }
 
-func (s *Server) traceTags(ctx context.Context) [][2]string {
-	tags := make([][2]string, len(s.Tags))
-	for i, tag := range s.Tags {
-		splt := strings.SplitN(tag, ":", 2)
-		if len(splt) < 2 {
-			tags[i] = [2]string{tag, ""}
-			continue
-		}
-		tags[i] = [2]string{splt[0], splt[1]}
-	}
-	return tags
-}
-
 // flushSpansDatadog flushes spans to datadog. The niltracer argument is ignored.
 func flushSpansDatadog(ddTraceAddress string, httpClient *http.Client, stats *statsd.Client, ssfSpan ssf.SSFSpan) {
 	ssfSpans := []ssf.SSFSpan{ssfSpan}
 	// span, _ := trace.StartSpanFromContext(ctx, "")
 
-	var finalTraces []*DatadogTraceSpan
-	for _, span := range ssfSpans {
-		// -1 is a canonical way of passing in invalid info in Go
-		// so we should support that too
-		parentID := span.ParentId
-
-		// check if this is the root span
-		if parentID <= 0 {
-			// we need parentId to be zero for json:omitempty to work
-			parentID = 0
-		}
-
-		resource := span.Tags[trace.ResourceKey]
-		name := span.Tags[trace.NameKey]
-
-		tags := map[string]string{}
-		for k, v := range span.Tags {
-			tags[k] = v
-		}
-
-		delete(tags, trace.NameKey)
-		delete(tags, trace.ResourceKey)
-
-		// TODO implement additional metrics
-		var metrics map[string]float64
-
-		var errorCode int64
-		if span.Error {
-			errorCode = 2
-		}
-
-		ddspan := &DatadogTraceSpan{
-			TraceID:  span.TraceId,
-			SpanID:   span.Id,
-			ParentID: parentID,
-			Service:  span.Service,
-			Name:     name,
-			Resource: resource,
-			Start:    span.StartTimestamp,
-			Duration: span.EndTimestamp - span.StartTimestamp,
-			// TODO don't hardcode
-			Type:    "http",
-			Error:   errorCode,
-			Metrics: metrics,
-			Meta:    tags,
-		}
-		finalTraces = append(finalTraces, ddspan)
-	}
-
-	if len(finalTraces) != 0 {
-		// this endpoint is not documented to take an array... but it does
-		// another curious constraint of this endpoint is that it does not
-		// support "Content-Encoding: deflate"
-
-		err := postHelper(context.TODO(), httpClient, stats, fmt.Sprintf("%s/spans", ddTraceAddress), finalTraces, "flush_traces", false)
-
-		if err == nil {
-			log.WithField("traces", len(finalTraces)).Info("Completed flushing traces to Datadog")
-		} else {
-			log.WithFields(logrus.Fields{
-				"traces":        len(finalTraces),
-				logrus.ErrorKey: err}).Warn("Error flushing traces to Datadog")
-		}
-	} else {
-		log.Info("No traces to flush to Datadog, skipping.")
-	}
 }

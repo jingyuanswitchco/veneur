@@ -332,45 +332,51 @@ func (ew *EventWorker) Flush() ([]samplers.UDPEvent, []samplers.UDPServiceCheck)
 
 // TraceWorker is similar to a Worker but it collects events and service checks instead of metrics.
 type TraceWorker struct {
-	TraceChan  chan ssf.SSFSpan
-	mutex      *sync.Mutex
-	traces     *ring.Ring
-	stats      *statsd.Client
-	bufferSize int
+	TraceChan chan ssf.SSFSpan
+	mutex     *sync.Mutex
+	sinks     []tracerSink
+	// traces     *ring.Ring
+	// stats      *statsd.Client
+	// bufferSize int
 }
 
 // NewTraceWorker creates an TraceWorker ready to collect events and service checks.
-func NewTraceWorker(stats *statsd.Client, bufferSize int) *TraceWorker {
+func NewTraceWorker(sinks []tracerSink) *TraceWorker {
 	return &TraceWorker{
-		TraceChan:  make(chan ssf.SSFSpan),
-		mutex:      &sync.Mutex{},
-		traces:     ring.New(bufferSize),
-		stats:      stats,
-		bufferSize: bufferSize,
+		TraceChan: make(chan ssf.SSFSpan),
+		mutex:     &sync.Mutex{},
+		sinks:     sinks,
+		// traces:     ring.New(bufferSize),
+		// stats:      stats,
+		// bufferSize: bufferSize,
 	}
 }
 
 // Work will start the EventWorker listening for events and service checks.
 // This function will never return.
 func (tw *TraceWorker) Work() {
-	for m := range tw.TraceChan {
-		tw.mutex.Lock()
-		tw.traces.Value = m
-		tw.traces = tw.traces.Next()
-		tw.mutex.Unlock()
+	for _, s := range tw.sinks {
+		for m := range tw.TraceChan {
+			s.flush(m)
+			// flushSpanLightstep(tw.lightstepTracer, m)
+			// tw.mutex.Lock()
+			// tw.traces.Value = m
+			// tw.traces = tw.traces.Next()
+			// tw.mutex.Unlock()
+		}
 	}
 }
 
 // Flush returns the TraceWorker's stored spans and
 // resets the stored contents.
 func (tw *TraceWorker) Flush() *ring.Ring {
-	start := time.Now()
+	// start := time.Now()
 	tw.mutex.Lock()
 
-	rettraces := tw.traces
-	tw.traces = ring.New(tw.bufferSize)
+	// rettraces := tw.traces
+	// tw.traces = ring.New(tw.bufferSize)
 
 	tw.mutex.Unlock()
-	tw.stats.TimeInMilliseconds("flush.event_worker_duration_ns", float64(time.Since(start).Nanoseconds()), nil, 1.0)
-	return rettraces
+	// tw.stats.TimeInMilliseconds("flush.event_worker_duration_ns", float64(time.Since(start).Nanoseconds()), nil, 1.0)
+	return nil
 }

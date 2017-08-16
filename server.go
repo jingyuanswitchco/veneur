@@ -35,6 +35,7 @@ import (
 	localfilep "github.com/stripe/veneur/plugins/localfile"
 	s3p "github.com/stripe/veneur/plugins/s3"
 	"github.com/stripe/veneur/samplers"
+	"github.com/stripe/veneur/ssf"
 	"github.com/stripe/veneur/trace"
 
 	opentracing "github.com/opentracing/opentracing-go"
@@ -116,6 +117,9 @@ type Server struct {
 }
 
 // TODO refactor and move this
+// TODO better name, also finalize type signature
+type traceFlusher func(ssf.SSFSpan)
+
 type tracerSink struct {
 	name string
 
@@ -282,8 +286,6 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 			bufferSize = defaultSpanBufferSize
 		}
 
-		ret.TraceWorker = NewTraceWorker(ret.Statsd, bufferSize)
-
 		ret.TraceAddr, err = net.ResolveUDPAddr("udp", conf.SsfAddress)
 		log.WithField("traceaddr", ret.TraceAddr).Info("Listening for trace spans on address")
 
@@ -300,7 +302,9 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 			ret.tracerSinks = append(ret.tracerSinks, tracerSink{
 				name:   "Datadog",
 				tracer: nil,
-				flush:  flushSpansDatadog,
+				flush: func(ssfSpan ssf.SSFSpan) {
+					flushSpansDatadog(ret.DDTraceAddress, ret.HTTPClient, ret.Statsd, ssfSpan)
+				},
 			})
 			log.Info("Configured Datadog trace sink")
 		}
@@ -361,13 +365,17 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 			ret.tracerSinks = append(ret.tracerSinks, tracerSink{
 				name:   "Lightstep",
 				tracer: lightstepTracer,
-				flush:  flushSpansLightstep,
+				flush: func(ssfSpan ssf.SSFSpan) {
+					flushSpanLightstep(lightstepTracer, ssfSpan)
+				},
 			})
 
 			// only set this if the original token was non-empty
 			ret.traceLightstepAccessToken = REDACTED
 			log.Info("Configured Lightstep trace sink")
 		}
+
+		ret.TraceWorker = NewTraceWorker(ret.tracerSinks)
 
 	} else {
 		trace.Disable()

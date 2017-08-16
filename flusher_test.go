@@ -15,6 +15,7 @@ import (
 	lightstep "github.com/lightstep/lightstep-tracer-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stripe/veneur/samplers"
+	"github.com/stripe/veneur/ssf"
 )
 
 func TestServerTags(t *testing.T) {
@@ -135,7 +136,10 @@ func testFlushTraceDatadog(t *testing.T, protobuf, jsn io.Reader) {
 	server.tracerSinks = append(server.tracerSinks, tracerSink{
 		name:   "Datadog",
 		tracer: nil,
-		flush:  flushSpansDatadog,
+		// flush:  flushSpansDatadog,
+		flush: func(ssfSpan ssf.SSFSpan) {
+			flushSpansDatadog(server.DDTraceAddress, server.HTTPClient, server.Statsd, ssfSpan)
+		},
 	})
 
 	assert.Equal(t, server.DDTraceAddress, config.DatadogTraceAPIAddress)
@@ -174,9 +178,12 @@ func testFlushTraceLightstep(t *testing.T, protobuf, jsn io.Reader) {
 	})
 
 	server.tracerSinks = append(server.tracerSinks, tracerSink{
-		name:   "Lightstep",
-		tracer: lightstepTracer,
-		flush:  flushSpansLightstep,
+		name: "Lightstep",
+		// tracer: lightstepTracer,
+		// flush:  flushSpansLightstep,
+		flush: func(ssfSpan ssf.SSFSpan) {
+			flushSpanLightstep(lightstepTracer, ssfSpan)
+		},
 	})
 
 	assert.Equal(t, server.DDTraceAddress, config.DatadogTraceAPIAddress)

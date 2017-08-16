@@ -475,6 +475,7 @@ func resolveEndpoint(endpoint string) (string, error) {
 }
 
 func (s *Server) flushTraces(ctx context.Context) {
+	return // TODO Remove this whole thing
 	if !s.TracingEnabled() {
 		return
 	}
@@ -515,6 +516,7 @@ func (s *Server) flushTraces(ctx context.Context) {
 			}
 
 			// this will overwrite tags already present on the span
+			// TODO Move this to ingestion!
 			for _, tag := range tags {
 				ssfSpan.Tags[tag[0]] = tag[1]
 			}
@@ -522,17 +524,17 @@ func (s *Server) flushTraces(ctx context.Context) {
 		}
 	})
 
-	for _, sink := range s.tracerSinks {
-		sinkFlushStart := time.Now()
-		sink.flush(span.Attach(ctx), s, sink.tracer, ssfSpans)
-		tags := []string{
-			fmt.Sprintf("sink:%s", sink.name),
-			fmt.Sprintf("service:%s", trace.Service),
-		}
-		s.Statsd.TimeInMilliseconds("worker.trace.sink.flush_duration_ns", float64(time.Since(sinkFlushStart).Nanoseconds()), []string{fmt.Sprintf("sink:%s", sink.name)}, 1.0)
-
-		s.Statsd.Count("worker.trace.sink.flushed_total", int64(len(ssfSpans)), tags, 1)
-	}
+	// for _, sink := range s.tracerSinks {
+	// 	sinkFlushStart := time.Now()
+	// 	sink.flush(span.Attach(ctx), s, sink.tracer, ssfSpans)
+	// 	tags := []string{
+	// 		fmt.Sprintf("sink:%s", sink.name),
+	// 		fmt.Sprintf("service:%s", trace.Service),
+	// 	}
+	// 	s.Statsd.TimeInMilliseconds("worker.trace.sink.flush_duration_ns", float64(time.Since(sinkFlushStart).Nanoseconds()), []string{fmt.Sprintf("sink:%s", sink.name)}, 1.0)
+	//
+	// 	s.Statsd.Count("worker.trace.sink.flushed_total", int64(len(ssfSpans)), tags, 1)
+	// }
 }
 
 func (s *Server) flushEventsChecks(ctx context.Context) {
@@ -713,12 +715,10 @@ func (s *Server) traceTags(ctx context.Context) [][2]string {
 	return tags
 }
 
-// TODO better name, also finalize type signature
-type traceFlusher func(context.Context, *Server, opentracing.Tracer, []ssf.SSFSpan)
-
 // flushSpansDatadog flushes spans to datadog. The niltracer argument is ignored.
-func flushSpansDatadog(ctx context.Context, s *Server, nilTracer opentracing.Tracer, ssfSpans []ssf.SSFSpan) {
-	span, _ := trace.StartSpanFromContext(ctx, "")
+func flushSpansDatadog(ddTraceAddress string, httpClient *http.Client, stats *statsd.Client, ssfSpan ssf.SSFSpan) {
+	ssfSpans := []ssf.SSFSpan{ssfSpan}
+	// span, _ := trace.StartSpanFromContext(ctx, "")
 
 	var finalTraces []*DatadogTraceSpan
 	for _, span := range ssfSpans {
@@ -774,7 +774,7 @@ func flushSpansDatadog(ctx context.Context, s *Server, nilTracer opentracing.Tra
 		// another curious constraint of this endpoint is that it does not
 		// support "Content-Encoding: deflate"
 
-		err := postHelper(span.Attach(ctx), s.HTTPClient, s.Statsd, fmt.Sprintf("%s/spans", s.DDTraceAddress), finalTraces, "flush_traces", false)
+		err := postHelper(context.TODO(), httpClient, stats, fmt.Sprintf("%s/spans", ddTraceAddress), finalTraces, "flush_traces", false)
 
 		if err == nil {
 			log.WithField("traces", len(finalTraces)).Info("Completed flushing traces to Datadog")
@@ -788,19 +788,19 @@ func flushSpansDatadog(ctx context.Context, s *Server, nilTracer opentracing.Tra
 	}
 }
 
-func flushSpansLightstep(ctx context.Context, s *Server, lightstepTracer opentracing.Tracer, ssfSpans []ssf.SSFSpan) {
-	span, _ := trace.StartSpanFromContext(ctx, "")
-	defer span.Finish()
-	for _, ssfSpan := range ssfSpans {
-		flushSpanLightstep(lightstepTracer, ssfSpan)
-	}
+// func flushSpanLightstep(s *Server, lightstepTracer opentracing.Tracer, ssfSpan ssf.SSFSpan) {
+// span, _ := trace.StartSpanFromContext(ctx, "")
+// defer span.Finish()
+// for _, ssfSpan := range ssfSpans {
+// flushSpanLightstep(lightstepTracer, ssfSpan)
+// }
 
-	lightstep.FlushLightStepTracer(lightstepTracer)
+// lightstep.FlushLightStepTracer(lightstepTracer)
 
-	// Confusingly, this will still get called even if the Opentracing client fails to reach the collector
-	// because we don't get access to the error if that happens.
-	log.WithField("traces", len(ssfSpans)).Info("Completed flushing traces to Lightstep")
-}
+// Confusingly, this will still get called even if the Opentracing client fails to reach the collector
+// because we don't get access to the error if that happens.
+// log.WithField("traces", len(ssfSpans)).Info("Completed flushing traces to Lightstep")
+// }
 
 // flushSpanLightstep builds a tracespan from an SSF and flushes
 // it using the provided OpenTracing tracer (sink)

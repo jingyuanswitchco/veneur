@@ -335,9 +335,6 @@ type TraceWorker struct {
 	TraceChan chan ssf.SSFSpan
 	mutex     *sync.Mutex
 	sinks     []tracerSink
-	// traces     *ring.Ring
-	// stats      *statsd.Client
-	// bufferSize int
 }
 
 // NewTraceWorker creates an TraceWorker ready to collect events and service checks.
@@ -346,37 +343,25 @@ func NewTraceWorker(sinks []tracerSink) *TraceWorker {
 		TraceChan: make(chan ssf.SSFSpan),
 		mutex:     &sync.Mutex{},
 		sinks:     sinks,
-		// traces:     ring.New(bufferSize),
-		// stats:      stats,
-		// bufferSize: bufferSize,
 	}
 }
 
-// Work will start the EventWorker listening for events and service checks.
+// Work will start the TraceWorker listening for spans.
 // This function will never return.
 func (tw *TraceWorker) Work() {
 	for _, s := range tw.sinks {
 		for m := range tw.TraceChan {
 			s.flush(m)
-			// flushSpanLightstep(tw.lightstepTracer, m)
-			// tw.mutex.Lock()
-			// tw.traces.Value = m
-			// tw.traces = tw.traces.Next()
-			// tw.mutex.Unlock()
 		}
 	}
 }
 
-// Flush returns the TraceWorker's stored spans and
-// resets the stored contents.
+// Flush doesn't do anything for traces.
 func (tw *TraceWorker) Flush() *ring.Ring {
-	// start := time.Now()
 	tw.mutex.Lock()
 
-	// rettraces := tw.traces
-	// tw.traces = ring.New(tw.bufferSize)
+	// TODO What do we do here?
 
 	tw.mutex.Unlock()
-	// tw.stats.TimeInMilliseconds("flush.event_worker_duration_ns", float64(time.Since(start).Nanoseconds()), nil, 1.0)
 	return nil
 }

@@ -136,7 +136,6 @@ func testFlushTraceDatadog(t *testing.T, protobuf, jsn io.Reader) {
 	server.tracerSinks = append(server.tracerSinks, tracerSink{
 		name:   "Datadog",
 		tracer: nil,
-		// flush:  flushSpansDatadog,
 		flush: func(ssfSpan ssf.SSFSpan) {
 			flushSpansDatadog(server.DDTraceAddress, server.HTTPClient, server.Statsd, ssfSpan)
 		},
@@ -179,8 +178,6 @@ func testFlushTraceLightstep(t *testing.T, protobuf, jsn io.Reader) {
 
 	server.tracerSinks = append(server.tracerSinks, tracerSink{
 		name: "Lightstep",
-		// tracer: lightstepTracer,
-		// flush:  flushSpansLightstep,
 		flush: func(ssfSpan ssf.SSFSpan) {
 			flushSpanLightstep(lightstepTracer, ssfSpan)
 		},

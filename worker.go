@@ -351,6 +351,7 @@ func NewTraceWorker(sinks []tracerSink) *TraceWorker {
 func (tw *TraceWorker) Work() {
 	for _, s := range tw.sinks {
 		for m := range tw.TraceChan {
+			// TODO add some metric collection here, saving per-service span counts
 			s.flush(m)
 		}
 	}
@@ -360,7 +361,7 @@ func (tw *TraceWorker) Work() {
 func (tw *TraceWorker) Flush() *ring.Ring {
 	tw.mutex.Lock()
 
-	// TODO What do we do here?
+	// TODO Flush metrics don't exist yet here.
 
 	tw.mutex.Unlock()
 	return nil

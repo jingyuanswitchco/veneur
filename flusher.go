@@ -523,18 +523,6 @@ func (s *Server) flushTraces(ctx context.Context) {
 			ssfSpans = append(ssfSpans, ssfSpan)
 		}
 	})
-
-	// for _, sink := range s.tracerSinks {
-	// 	sinkFlushStart := time.Now()
-	// 	sink.flush(span.Attach(ctx), s, sink.tracer, ssfSpans)
-	// 	tags := []string{
-	// 		fmt.Sprintf("sink:%s", sink.name),
-	// 		fmt.Sprintf("service:%s", trace.Service),
-	// 	}
-	// 	s.Statsd.TimeInMilliseconds("worker.trace.sink.flush_duration_ns", float64(time.Since(sinkFlushStart).Nanoseconds()), []string{fmt.Sprintf("sink:%s", sink.name)}, 1.0)
-	//
-	// 	s.Statsd.Count("worker.trace.sink.flushed_total", int64(len(ssfSpans)), tags, 1)
-	// }
 }
 
 func (s *Server) flushEventsChecks(ctx context.Context) {

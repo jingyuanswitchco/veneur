@@ -119,7 +119,7 @@ func (c *Counter) Export() (JSONMetric, error) {
 
 // Combine merges the values seen with another set (marshalled as a byte slice)
 func (c *Counter) Combine(other []byte) error {
-	var otherCounts int64
+	var otherCounts float64
 	buf := bytes.NewReader(other)
 	err := binary.Read(buf, binary.LittleEndian, &otherCounts)
 

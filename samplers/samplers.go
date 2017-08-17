@@ -81,7 +81,7 @@ type Counter struct {
 
 // Sample adds a sample to the counter.
 func (c *Counter) Sample(sample float64, sampleRate float32) {
-	c.value += sample * (1/sampleRate)
+	c.value += sample * (1/float64(sampleRate))
 }
 
 // Flush generates a DDMetric from the current state of this Counter.
